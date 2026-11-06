@@ -82,7 +82,7 @@ object Health {
         }
         if (notifPermissionDenied(ctx)) {
             issues.add(
-                Issue(Level.WARN, "Нет разрешения показывать уведомления: сводка пропущенного не появится.", Act.NOTIF_PERMISSION, "Разрешить")
+                Issue(Level.WARN, "Нет разрешения показывать уведомления: не будут работать копии для часов и сводка пропущенного.", Act.NOTIF_PERMISSION, "Разрешить")
             )
         }
 
@@ -98,6 +98,8 @@ object Health {
         } else {
             infos.add("Последнее уведомление Telegram: " + ago(System.currentTimeMillis() - last))
         }
+
+        infos.add(if (prefs.forward) "Копии для часов: включены" else "Копии для часов: выключены")
 
         val worst = issues.maxByOrNull { it.level.ordinal }?.level ?: Level.OK
         val title = when (worst) {

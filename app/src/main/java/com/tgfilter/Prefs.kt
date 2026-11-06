@@ -21,6 +21,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("logAll", false)
         set(v) { sp.edit().putBoolean("logAll", v).apply() }
 
+    /** Пересылать на часы копии уведомлений Telegram (вместо самого Telegram). */
+    var forward: Boolean
+        get() = sp.getBoolean("forward", true)
+        set(v) { sp.edit().putBoolean("forward", v).apply() }
+
     var askedNotif: Boolean
         get() = sp.getBoolean("askedNotif", false)
         set(v) { sp.edit().putBoolean("askedNotif", v).apply() }

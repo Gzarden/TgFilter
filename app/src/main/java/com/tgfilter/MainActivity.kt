@@ -250,6 +250,7 @@ class MainActivity : Activity() {
         mr.addView(mainSwitch)
         mc.addView(mr)
         homeBox.put(mc, 12)
+        homeBox.put(watchCard(), 12)
 
         // --- каналы
         homeBox.put(label("Каналы", 18f, Pal.text, true), 22)
@@ -275,36 +276,91 @@ class MainActivity : Activity() {
                 6
             )
         } else {
-            homeBox.put(label("Нажмите на чат, чтобы создать для него правило.", 13f, Pal.sub), 4)
-            for (title in recent) {
+            homeBox.put(label("Нажмите на чат, чтобы создать или изменить правило.", 13f, Pal.sub), 4)
+            for (item in recent) {
+                val title = item.first
+                val rule = item.second
                 val rc = card()
                 val rr = hbox()
                 rr.addView(label(title, 15f, Pal.text), LinearLayout.LayoutParams(0, WRAP, 1f))
-                rr.addView(label("Добавить", 13f, Pal.accent, true))
+                if (rule == null) {
+                    rr.addView(label("Добавить", 13f, Pal.accent, true))
+                } else {
+                    rr.addView(label("Правило есть", 13f, Pal.good, true))
+                }
                 rc.addView(rr)
-                rc.setOnClickListener { showEditor(null, title) }
+                rc.setOnClickListener {
+                    if (rule == null) showEditor(null, title) else showEditor(rule)
+                }
                 homeBox.put(rc, 8)
             }
         }
     }
 
-    private fun recentChats(entries: List<Entry>, channels: List<Channel>): List<String> {
-        val seen = LinkedHashSet<String>()
+    private fun watchCard(): View {
+        val c = card()
+        val r = hbox()
+        val tx = vbox()
+        tx.addView(label("Пересылка на часы", 16f, Pal.text, true))
+        tx.addView(label("TgFilter сам отправляет на часы копии уведомлений Telegram и не отправляет скрытые.", 12f, Pal.sub))
+        r.addView(tx, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val sw = Switch(this)
+        sw.isChecked = prefs.forward
+        sw.setOnCheckedChangeListener { _, on -> prefs.forward = on }
+        r.addView(sw)
+        c.addView(r)
+        c.put(
+            label(
+                "Как настроить:\n" +
+                    "1. В Huawei Health включите уведомления для TgFilter.\n" +
+                    "2. Нажмите «Проверка на часах»: на часах должно появиться тестовое уведомление.\n" +
+                    "3. Только после этого отключите там же уведомления для Telegram.\n\n" +
+                    "На телефоне копии беззвучные. Они исчезают, когда вы прочитали сообщение в Telegram.",
+                13f, Pal.sub
+            ),
+            12
+        )
+        val b = hbox()
+        val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
+        lp.rightMargin = dp(8)
+        b.addView(pill("Проверка на часах", true) { sendTest() }, lp)
+        b.addView(pill("Настройки копий", false) { openCopySettings() }, LinearLayout.LayoutParams(0, WRAP, 1f))
+        c.put(b, 12)
+        return c
+    }
+
+    private fun sendTest() {
+        val ok = Forward.test(this)
+        val msg = if (ok) "Отправлено. Смотрите на часах." else "Нет разрешения на уведомления"
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    }
+
+    private fun openCopySettings() {
+        Forward.ensureChannel(this)
+        val i = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+        i.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        i.putExtra(Settings.EXTRA_CHANNEL_ID, Forward.CH_ID)
+        startActivity(i)
+    }
+
+    /** Недавние чаты Telegram; у тех, для кого уже есть правило, оно указано во втором поле. */
+    private fun recentChats(entries: List<Entry>, channels: List<Channel>): List<Pair<String, Channel?>> {
+        val seen = LinkedHashMap<String, Channel?>()
         for (e in entries) {
             if (e.pkg !in FilterService.TELEGRAM_PACKAGES || e.summary) continue
             if (e.kind != "BLOCKED" && e.kind != "ALLOWED" && e.kind != "OTHER") continue
             val t = e.title.trim()
             if (t.isEmpty() || t.equals("Telegram", ignoreCase = true)) continue
+            if (seen.containsKey(t)) continue
             val n = Matcher.norm(t)
-            val covered = channels.any {
+            val rule = channels.firstOrNull {
                 val cn = Matcher.norm(it.name)
                 cn.isNotEmpty() && n.contains(cn)
             }
-            if (covered) continue
-            seen.add(t)
-            if (seen.size >= 8) break
+            seen[t] = rule
+            if (seen.size >= 10) break
         }
-        return seen.toList()
+        return seen.entries.map { Pair(it.key, it.value) }
     }
 
     private fun channelCard(ch: Channel): View {

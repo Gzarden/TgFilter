@@ -13,7 +13,8 @@ import java.util.Locale
 
 /**
  * Видит уведомления на телефоне. Для каждого уведомления Telegram находит подходящий
- * канал и, если сейчас не время показа, удаляет уведомление. Всё записывается в журнал.
+ * канал: если сейчас не время показа, удаляет уведомление и ничего не отправляет на часы;
+ * иначе оставляет его и создаёт копию для часов. Всё записывается в журнал.
  */
 class FilterService : NotificationListenerService() {
 
@@ -41,6 +42,35 @@ class FilterService : NotificationListenerService() {
             handle(sbn)
         } catch (e: Exception) {
             Journal.sys(this, "Ошибка обработки уведомления: " + e.javaClass.simpleName + ": " + e.message)
+        }
+    }
+
+    override fun onNotificationRemoved(
+        sbn: StatusBarNotification,
+        rankingMap: NotificationListenerService.RankingMap,
+        reason: Int
+    ) {
+        try {
+            handleRemoved(sbn, reason)
+        } catch (e: Exception) {
+            // не критично
+        }
+    }
+
+    private fun handleRemoved(sbn: StatusBarNotification, reason: Int) {
+        if (sbn.packageName == packageName) {
+            // Копию для часов убрали (смахнули на телефоне или на часах): убираем и оригинал.
+            if (sbn.notification.channelId != Forward.CH_ID) return
+            if (reason == NotificationListenerService.REASON_CANCEL ||
+                reason == NotificationListenerService.REASON_LISTENER_CANCEL
+            ) {
+                val orig = sbn.tag ?: return
+                Forward.forget(orig)
+                cancelNotification(orig)
+            }
+        } else if (sbn.packageName in TELEGRAM_PACKAGES) {
+            // Оригинал пропал (прочитан в Telegram): копия больше не нужна.
+            Forward.remove(this, sbn.key)
         }
     }
 
@@ -81,41 +111,46 @@ class FilterService : NotificationListenerService() {
         Digest.flushIfDue(this)
 
         if (snap.summary) {
-            log("SUMMARY", snap, "", "Общая сводка Telegram (группа уведомлений)")
+            log("SUMMARY", snap, "", "Общая сводка Telegram (группа уведомлений), на часы не копируется")
             scheduleSummaryCheck(snap)
             return
         }
 
-        if (!prefs.enabled) {
-            log("OTHER", snap, "", "Фильтр выключен главным переключателем")
+        val channels = prefs.channels()
+        val ch = if (prefs.enabled) channels.firstOrNull { it.enabled && Matcher.matches(it, snap) } else null
+
+        if (ch != null && !ch.isAllowed()) {
+            cancelNotification(sbn.key)
+            lastBlockedAt = System.currentTimeMillis()
+            prefs.bump(ch.id, "blocked")
+            Forward.remove(this, sbn.key)
+            log(
+                "BLOCKED", snap, ch.name,
+                "Вне времени показа (" + ch.scheduleText() + "), уведомление удалено, на часы не отправлено"
+            )
+            if (ch.digest) {
+                val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                val body = snap.latest.ifBlank { snap.title }.take(100)
+                prefs.addPending(ch.id, "$time  $body")
+                Digest.schedule(this)
+            }
             return
         }
 
-        val channels = prefs.channels()
-        val ch = channels.firstOrNull { it.enabled && Matcher.matches(it, snap) }
-        if (ch == null) {
+        // Уведомление остаётся: создаём копию для часов.
+        val fw = Forward.copy(this, sbn, snap)
+        if (!prefs.enabled) {
+            log("OTHER", snap, "", "Фильтр выключен главным переключателем; $fw")
+        } else if (ch == null) {
             val names = channels.filter { it.enabled }.joinToString(", ") { "«" + it.name + "»" }
             val what = if (names.isEmpty()) "нет включённых каналов" else "искали: $names"
-            log("OTHER", snap, "", "Не совпало ни с одним каналом ($what)")
-            return
-        }
-
-        if (ch.isAllowed()) {
+            log("OTHER", snap, "", "Не совпало ни с одним каналом ($what); $fw")
+        } else {
             prefs.bump(ch.id, "allowed")
-            log("ALLOWED", snap, ch.name, "Сейчас время показа (" + ch.scheduleText() + "), уведомление оставлено")
-            return
-        }
-
-        cancelNotification(sbn.key)
-        lastBlockedAt = System.currentTimeMillis()
-        prefs.bump(ch.id, "blocked")
-        log("BLOCKED", snap, ch.name, "Вне времени показа (" + ch.scheduleText() + "), уведомление удалено")
-
-        if (ch.digest) {
-            val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-            val body = snap.latest.ifBlank { snap.title }.take(100)
-            prefs.addPending(ch.id, "$time  $body")
-            Digest.schedule(this)
+            log(
+                "ALLOWED", snap, ch.name,
+                "Сейчас время показа (" + ch.scheduleText() + "), уведомление оставлено; $fw"
+            )
         }
     }
 
