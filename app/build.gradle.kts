@@ -11,8 +11,19 @@ android {
         applicationId = "com.tgfilter"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
+    }
+
+    // Фиксированный ключ подписи: благодаря ему следующие версии
+    // устанавливаются поверх предыдущих, без удаления приложения.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     compileOptions {
