@@ -65,12 +65,13 @@ class FilterService : NotificationListenerService() {
                 reason == NotificationListenerService.REASON_LISTENER_CANCEL
             ) {
                 val orig = sbn.tag ?: return
-                Forward.forget(orig)
+                Forward.forget(this, orig)
                 cancelNotification(orig)
             }
         } else if (sbn.packageName in TELEGRAM_PACKAGES) {
             // Оригинал пропал (прочитан в Telegram): копия больше не нужна.
-            Forward.remove(this, sbn.key)
+            // С задержкой: Telegram мог просто обновить список и сейчас выставит его снова.
+            Forward.removeLater(this, sbn.key)
         }
     }
 

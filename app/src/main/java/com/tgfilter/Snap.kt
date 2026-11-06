@@ -19,6 +19,7 @@ class Snap(
     val senders: List<String>,
     val latest: String,
     val lastSender: String,
+    val latestTime: Long,
     val summary: Boolean,
     val sysChannel: String,
 ) {
@@ -40,6 +41,7 @@ class Snap(
             fun s(k: String): String = x.getCharSequence(k)?.toString().orEmpty()
 
             var lastSender = ""
+            var latestTime = 0L
             val senders = ArrayList<String>()
             val msgTexts = ArrayList<String>()
             @Suppress("DEPRECATION")
@@ -53,6 +55,7 @@ class Snap(
                         if (text.isNotBlank()) {
                             msgTexts.add(text)
                             lastSender = sender
+                            latestTime = m.getLong("time", 0L)
                         }
                     }
                 }
@@ -75,6 +78,7 @@ class Snap(
                 senders = senders,
                 latest = msgTexts.lastOrNull() ?: text,
                 lastSender = lastSender,
+                latestTime = latestTime,
                 summary = (n.flags and Notification.FLAG_GROUP_SUMMARY) != 0,
                 sysChannel = n.channelId.orEmpty(),
             )

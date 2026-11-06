@@ -11,8 +11,8 @@ android {
         applicationId = "com.tgfilter"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "3.1"
+        versionCode = 5
+        versionName = "3.2"
     }
 
     // Фиксированный ключ подписи: благодаря ему следующие версии

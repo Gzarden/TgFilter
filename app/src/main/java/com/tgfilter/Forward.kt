@@ -20,9 +20,39 @@ object Forward {
     private const val ID = 1
     private val CHANNELS = listOf("watch_copy", "watch_copy_low", "watch_copy_min")
 
-    private val last = HashMap<String, String>()
     private val timers = HashMap<String, Runnable>()
+    private val removals = HashMap<String, Runnable>()
     private val handler = Handler(Looper.getMainLooper())
+
+    /**
+     * Какой текст уже отправлялся на часы по каждому уведомлению. Хранится на диске: если
+     * систему выгрузила наше приложение, а Telegram потом заново выставил старые уведомления
+     * (он делает это при каждом новом сообщении в другом чате), старые копии не воскресают.
+     */
+    private fun sigs(ctx: Context) =
+        ctx.applicationContext.getSharedPreferences("tgfilter_fwd", Context.MODE_PRIVATE)
+
+    private fun sigGet(ctx: Context, key: String): String? =
+        sigs(ctx).getString(key, null)?.substringAfter('|', "")
+
+    private fun sigPut(ctx: Context, key: String, sig: String) {
+        val sp = sigs(ctx)
+        val all = sp.all
+        val ed = sp.edit()
+        if (all.size > 300) {
+            // убираем самые старые записи, чтобы файл не рос бесконечно
+            val old = all.entries
+                .map { it.key to ((it.value as? String)?.substringBefore('|')?.toLongOrNull() ?: 0L) }
+                .sortedBy { it.second }
+                .take(100)
+            for (o in old) ed.remove(o.first)
+        }
+        ed.putString(key, System.currentTimeMillis().toString() + "|" + sig).apply()
+    }
+
+    private fun sigDrop(ctx: Context, key: String) {
+        sigs(ctx).edit().remove(key).apply()
+    }
 
     fun isCopyChannel(id: String?): Boolean = id != null && CHANNELS.contains(id)
 
@@ -91,12 +121,14 @@ object Forward {
         val text = body(s)
         if (title.isBlank() && text.isBlank()) return "копия не нужна: пустое уведомление"
 
-        val sig = title + "\u0000" + text
-        synchronized(last) {
-            if (last[sbn.key] == sig) return "копия не отправлена: тот же текст уже отправлен"
-            if (last.size > 200) last.clear()
-            last[sbn.key] = sig
-        }
+        // Оригинал вернулся (Telegram снял и тут же выставил его заново): копию не трогаем.
+        cancelPendingRemoval(sbn.key)
+
+        // Подпись: заголовок, текст и время последнего сообщения. Если ничего не изменилось,
+        // это просто повторная публикация старого уведомления, и копию заново не создаём.
+        val sig = title + "\u0000" + text + "\u0000" + s.latestTime
+        if (sigGet(ctx, sbn.key) == sig) return "копия не отправлена: это повтор старого уведомления"
+        sigPut(ctx, sbn.key, sig)
 
         val nm = ctx.getSystemService(NotificationManager::class.java)
             ?: return "копия НЕ отправлена: нет доступа к уведомлениям"
@@ -109,8 +141,9 @@ object Forward {
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setGroup("tgf_" + sbn.key)
             .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
             .setShowWhen(true)
-            .setWhen(sbn.postTime)
+            .setWhen(if (n.`when` > 0L) n.`when` else sbn.postTime)
         val open = n.contentIntent
         if (open != null) b.setContentIntent(open)
         nm.notify(sbn.key, ID, b.build())
@@ -118,9 +151,10 @@ object Forward {
         return "копия для часов отправлена"
     }
 
-    /** Убирает копию, когда пропал оригинал (прочитан или удалён). */
+    /** Убирает копию сразу. */
     fun remove(ctx: Context, key: String) {
-        synchronized(last) { last.remove(key) }
+        cancelPendingRemoval(key)
+        sigDrop(ctx, key)
         synchronized(timers) {
             val old = timers.remove(key)
             if (old != null) handler.removeCallbacks(old)
@@ -129,8 +163,31 @@ object Forward {
         nm.cancel(key, ID)
     }
 
-    fun forget(key: String) {
-        synchronized(last) { last.remove(key) }
+    /**
+     * Оригинал пропал. Telegram снимает уведомление и в том случае, когда оно прочитано,
+     * и когда он просто обновляет список после нового сообщения в другом чате. Поэтому
+     * копию убираем с небольшой задержкой: если оригинал вернётся, копия останется как была.
+     */
+    fun removeLater(ctx: Context, key: String) {
+        val app = ctx.applicationContext
+        cancelPendingRemoval(key)
+        val r = Runnable {
+            synchronized(removals) { removals.remove(key) }
+            remove(app, key)
+        }
+        synchronized(removals) { removals[key] = r }
+        handler.postDelayed(r, 4000L)
+    }
+
+    private fun cancelPendingRemoval(key: String) {
+        synchronized(removals) {
+            val old = removals.remove(key)
+            if (old != null) handler.removeCallbacks(old)
+        }
+    }
+
+    fun forget(ctx: Context, key: String) {
+        sigDrop(ctx, key)
     }
 
     /** Тестовое уведомление: помогает проверить, что Huawei Health пересылает TgFilter. */
