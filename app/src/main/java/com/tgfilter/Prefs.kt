@@ -26,6 +26,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("forward", true)
         set(v) { sp.edit().putBoolean("forward", v).apply() }
 
+    /** Вид копий для часов на телефоне: 0 = обычные (беззвучные), 1 = тихие, 2 = свёрнутые. */
+    var copyMode: Int
+        get() = sp.getInt("copyMode", 0)
+        set(v) { sp.edit().putInt("copyMode", v).apply() }
+
+    /** Через сколько секунд убирать копию с телефона (0 = не убирать). */
+    var copyTtlSec: Int
+        get() = sp.getInt("copyTtlSec", 0)
+        set(v) { sp.edit().putInt("copyTtlSec", v).apply() }
+
     var askedNotif: Boolean
         get() = sp.getBoolean("askedNotif", false)
         set(v) { sp.edit().putBoolean("askedNotif", v).apply() }

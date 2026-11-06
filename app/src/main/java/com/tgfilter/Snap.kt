@@ -28,6 +28,7 @@ class Snap(
         if (big.isNotBlank()) parts.add("большой текст: $big")
         if (lines.isNotBlank()) parts.add("строки: $lines")
         if (senders.isNotEmpty()) parts.add("отправители: " + senders.joinToString(", "))
+        parts.add("ключ: $key")
         return parts.joinToString("; ")
     }
 

@@ -139,7 +139,9 @@ object Export {
         sb.append("Фильтр: ${if (prefs.enabled) "включён" else "выключен"}; запись всех приложений: ${if (prefs.logAll) "да" else "нет"}\n")
         val last = prefs.lastTelegramAt
         sb.append("Последнее уведомление Telegram: ${if (last == 0L) "ни разу" else fmt.format(Date(last))}\n")
-        sb.append("Копии для часов: ${if (prefs.forward) "включены" else "выключены"}\n")
+        sb.append("Копии для часов: ${if (prefs.forward) "включены" else "выключены"}; ")
+        sb.append("вид: ${listOf("обычные", "тихие", "свёрнутые")[prefs.copyMode.coerceIn(0, 2)]}; ")
+        sb.append("убирать через: ${if (prefs.copyTtlSec == 0) "не убирать" else prefs.copyTtlSec.toString() + " с"}\n")
         sb.append("Состояние: ${st.title}\n")
         for (i in st.issues) sb.append("  ! ${i.text}\n")
         sb.append("Каналы:\n")

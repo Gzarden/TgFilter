@@ -320,6 +320,28 @@ class MainActivity : Activity() {
             ),
             12
         )
+        c.put(label("Вид копий на телефоне", 13f, Pal.text, true), 16)
+        c.put(chipRow(listOf("Обычные", "Тихие", "Свёрнутые"), prefs.copyMode) { prefs.copyMode = it }, 6)
+        c.put(
+            label(
+                "«Свёрнутые» почти не видны на телефоне. После смены нажмите «Проверка на часах». " +
+                    "Если тест не пришёл, выберите «Тихие» или «Обычные».",
+                12f, Pal.sub
+            ),
+            4
+        )
+        c.put(label("Убирать копию с телефона через", 13f, Pal.text, true), 16)
+        val ttlValues = listOf(0, 15, 60, 300)
+        val ttlIndex = ttlValues.indexOf(prefs.copyTtlSec).coerceAtLeast(0)
+        c.put(chipRow(listOf("Не убирать", "15 с", "1 мин", "5 мин"), ttlIndex) { prefs.copyTtlSec = ttlValues[it] }, 6)
+        c.put(
+            label(
+                "Это убирает дубль на телефоне. Если вместе с ним пропадает и уведомление на часах, верните «Не убирать».",
+                12f, Pal.sub
+            ),
+            4
+        )
+
         val b = hbox()
         val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
         lp.rightMargin = dp(8)
@@ -327,6 +349,38 @@ class MainActivity : Activity() {
         b.addView(pill("Настройки копий", false) { openCopySettings() }, LinearLayout.LayoutParams(0, WRAP, 1f))
         c.put(b, 12)
         return c
+    }
+
+    /** Ряд кнопок-вариантов: выбранная подсвечена. */
+    private fun chipRow(options: List<String>, selected: Int, onSelect: (Int) -> Unit): View {
+        val row = hbox()
+        val chips = ArrayList<TextView>()
+        var cur = selected
+        fun style() {
+            for (i in chips.indices) {
+                val on = i == cur
+                chips[i].setTextColor(if (on) Pal.onAccent else Pal.text)
+                chips[i].background = rounded(if (on) Pal.accent else Pal.chip, 12)
+            }
+        }
+        for (i in options.indices) {
+            val t = TextView(this)
+            t.text = options[i]
+            t.gravity = Gravity.CENTER
+            t.textSize = 13f
+            t.setPadding(dp(4), dp(10), dp(4), dp(10))
+            t.setOnClickListener {
+                cur = i
+                style()
+                onSelect(i)
+            }
+            chips.add(t)
+            val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
+            if (i < options.size - 1) lp.rightMargin = dp(6)
+            row.addView(t, lp)
+        }
+        style()
+        return row
     }
 
     private fun sendTest() {
@@ -339,7 +393,7 @@ class MainActivity : Activity() {
         Forward.ensureChannel(this)
         val i = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
         i.putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-        i.putExtra(Settings.EXTRA_CHANNEL_ID, Forward.CH_ID)
+        i.putExtra(Settings.EXTRA_CHANNEL_ID, Forward.channelId(this))
         startActivity(i)
     }
 

@@ -60,7 +60,7 @@ class FilterService : NotificationListenerService() {
     private fun handleRemoved(sbn: StatusBarNotification, reason: Int) {
         if (sbn.packageName == packageName) {
             // Копию для часов убрали (смахнули на телефоне или на часах): убираем и оригинал.
-            if (sbn.notification.channelId != Forward.CH_ID) return
+            if (!Forward.isCopyChannel(sbn.notification.channelId)) return
             if (reason == NotificationListenerService.REASON_CANCEL ||
                 reason == NotificationListenerService.REASON_LISTENER_CANCEL
             ) {

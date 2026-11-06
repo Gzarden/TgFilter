@@ -4,6 +4,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.StatusBarNotification
 
 /**
@@ -15,14 +17,28 @@ import android.service.notification.StatusBarNotification
  * кроме тех, что скрыты правилами. Копия живёт, пока жив оригинал в Telegram.
  */
 object Forward {
-    const val CH_ID = "watch_copy"
     private const val ID = 1
+    private val CHANNELS = listOf("watch_copy", "watch_copy_low", "watch_copy_min")
+
     private val last = HashMap<String, String>()
+    private val timers = HashMap<String, Runnable>()
+    private val handler = Handler(Looper.getMainLooper())
+
+    fun isCopyChannel(id: String?): Boolean = id != null && CHANNELS.contains(id)
+
+    /** Канал, в который сейчас кладутся копии (зависит от выбранного вида). */
+    fun channelId(ctx: Context): String = CHANNELS[Prefs(ctx).copyMode.coerceIn(0, 2)]
 
     fun ensureChannel(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
-        if (nm.getNotificationChannel(CH_ID) == null) {
-            val ch = NotificationChannel(CH_ID, "Копии для часов", NotificationManager.IMPORTANCE_DEFAULT)
+        val defs = listOf(
+            Triple(CHANNELS[0], "Копии для часов: обычные", NotificationManager.IMPORTANCE_DEFAULT),
+            Triple(CHANNELS[1], "Копии для часов: тихие", NotificationManager.IMPORTANCE_LOW),
+            Triple(CHANNELS[2], "Копии для часов: свёрнутые", NotificationManager.IMPORTANCE_MIN),
+        )
+        for (d in defs) {
+            if (nm.getNotificationChannel(d.first) != null) continue
+            val ch = NotificationChannel(d.first, d.second, d.third)
             ch.description = "Беззвучные копии уведомлений Telegram, которые Huawei Health пересылает на часы"
             ch.setSound(null, null)
             ch.enableVibration(false)
@@ -40,6 +56,23 @@ object Forward {
             text = "$who: $text"
         }
         return text
+    }
+
+    /** Убирает копию с телефона через заданное время (если оно задано). */
+    private fun scheduleRemoval(ctx: Context, key: String) {
+        val ttl = Prefs(ctx).copyTtlSec
+        synchronized(timers) {
+            val old = timers.remove(key)
+            if (old != null) handler.removeCallbacks(old)
+        }
+        if (ttl <= 0) return
+        val app = ctx.applicationContext
+        val r = Runnable {
+            synchronized(timers) { timers.remove(key) }
+            app.getSystemService(NotificationManager::class.java)?.cancel(key, ID)
+        }
+        synchronized(timers) { timers[key] = r }
+        handler.postDelayed(r, ttl * 1000L)
     }
 
     /** Создаёт копию для часов. Возвращает короткое пояснение для журнала. */
@@ -65,9 +98,10 @@ object Forward {
             last[sbn.key] = sig
         }
 
-        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return "копия НЕ отправлена: нет доступа к уведомлениям"
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+            ?: return "копия НЕ отправлена: нет доступа к уведомлениям"
         ensureChannel(ctx)
-        val b = Notification.Builder(ctx, CH_ID)
+        val b = Notification.Builder(ctx, channelId(ctx))
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(title)
             .setContentText(text)
@@ -80,12 +114,17 @@ object Forward {
         val open = n.contentIntent
         if (open != null) b.setContentIntent(open)
         nm.notify(sbn.key, ID, b.build())
+        scheduleRemoval(ctx, sbn.key)
         return "копия для часов отправлена"
     }
 
     /** Убирает копию, когда пропал оригинал (прочитан или удалён). */
     fun remove(ctx: Context, key: String) {
         synchronized(last) { last.remove(key) }
+        synchronized(timers) {
+            val old = timers.remove(key)
+            if (old != null) handler.removeCallbacks(old)
+        }
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
         nm.cancel(key, ID)
     }
@@ -99,13 +138,14 @@ object Forward {
         if (Health.notifPermissionDenied(ctx)) return false
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return false
         ensureChannel(ctx)
-        val n = Notification.Builder(ctx, CH_ID)
+        val n = Notification.Builder(ctx, channelId(ctx))
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle("TgFilter: проверка связи")
             .setContentText("Если это уведомление появилось на часах, пересылка настроена верно.")
             .setAutoCancel(true)
             .build()
         nm.notify("test", ID, n)
+        scheduleRemoval(ctx, "test")
         return true
     }
 }
