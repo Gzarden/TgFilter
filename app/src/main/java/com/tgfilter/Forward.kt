@@ -54,6 +54,29 @@ object Forward {
         sigs(ctx).edit().remove(key).apply()
     }
 
+    /**
+     * Недавно отправленные на часы сообщения. Запоминаем по содержанию и времени самого сообщения,
+     * а не по ключу уведомления и не по тому, жива ли копия: Telegram иногда снимает уведомление и
+     * через несколько секунд выставляет то же самое, иногда под другим ключом. Без этой памяти копия
+     * к тому моменту уже убрана, и то же сообщение уходило на часы второй раз.
+     */
+    private const val RECENT_MS = 30 * 60 * 1000L
+    private const val RECENT_NO_TIME_MS = 30 * 1000L
+
+    private fun recentKey(title: String, text: String, time: Long): String =
+        "r|" + title.hashCode() + ":" + text.hashCode() + ":" + time
+
+    private fun recentlySent(ctx: Context, title: String, text: String, time: Long): Boolean {
+        val v = sigs(ctx).getString(recentKey(title, text, time), null) ?: return false
+        val at = v.substringBefore('|').toLongOrNull() ?: return false
+        val limit = if (time > 0L) RECENT_MS else RECENT_NO_TIME_MS
+        return System.currentTimeMillis() - at < limit
+    }
+
+    private fun markSent(ctx: Context, title: String, text: String, time: Long) {
+        sigPut(ctx, recentKey(title, text, time), "r")
+    }
+
     fun isCopyChannel(id: String?): Boolean = id != null && CHANNELS.contains(id)
 
     /** Канал, в который сейчас кладутся копии (зависит от выбранного вида). */
@@ -124,11 +147,18 @@ object Forward {
         // Оригинал вернулся (Telegram снял и тут же выставил его заново): копию не трогаем.
         cancelPendingRemoval(sbn.key)
 
+        // Это же сообщение уже уходило на часы (в том числе под другим ключом или после того,
+        // как прежняя копия была убрана): второй раз не отправляем.
+        if (recentlySent(ctx, title, text, s.latestTime)) {
+            return "копия не отправлена: это сообщение уже отправлялось на часы (метка сообщения: " + s.latestTime + ")"
+        }
+
         // Подпись: заголовок и текст. Время сообщения в неё не входит: Telegram может выставить
         // одно и то же уведомление дважды подряд с разной меткой времени, и на часах получался дубль.
         val sig = title + "\u0000" + text
         if (sigGet(ctx, sbn.key) == sig) return "копия не отправлена: это повтор старого уведомления"
         sigPut(ctx, sbn.key, sig)
+        markSent(ctx, title, text, s.latestTime)
 
         val nm = ctx.getSystemService(NotificationManager::class.java)
             ?: return "копия НЕ отправлена: нет доступа к уведомлениям"
@@ -166,7 +196,8 @@ object Forward {
     /**
      * Оригинал пропал. Telegram снимает уведомление и в том случае, когда оно прочитано,
      * и когда он просто обновляет список после нового сообщения в другом чате. Поэтому
-     * копию убираем с небольшой задержкой: если оригинал вернётся, копия останется как была.
+     * копию убираем с задержкой 20 с (у одного канала он возвращается примерно через 5 с):
+     * если оригинал вернётся, копия останется как была.
      */
     fun removeLater(ctx: Context, key: String) {
         val app = ctx.applicationContext
@@ -176,7 +207,7 @@ object Forward {
             remove(app, key)
         }
         synchronized(removals) { removals[key] = r }
-        handler.postDelayed(r, 4000L)
+        handler.postDelayed(r, 20000L)
     }
 
     private fun cancelPendingRemoval(key: String) {
